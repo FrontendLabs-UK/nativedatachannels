@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <string>
+#include <string.h>
 #include <map>
 #include "rtc.h"
 

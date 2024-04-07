@@ -6,7 +6,6 @@ import uk.frontendlabs.nativedatachannels.RtcCommonClient
 import uk.frontendlabs.nativedatachannels.peer.Peer
 
 fun main() {
-    Rtc.preload()
     println("This is the [MobileApp]")
 //    val peer = Peer(
 //        webSocketHost = "ws://localhost",

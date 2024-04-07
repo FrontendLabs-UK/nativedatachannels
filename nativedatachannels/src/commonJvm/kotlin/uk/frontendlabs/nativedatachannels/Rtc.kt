@@ -5,6 +5,8 @@ import java.io.IOException
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.outputStream
 
+expect fun isAndroid(): Boolean
+
 object Rtc {
     external fun preload()
     external fun cleanup()
@@ -33,7 +35,7 @@ object Rtc {
 
             val libNames = when {
                 os.contains("Mac OS X") -> listOf("macos/libnativedatachannels.dylib" to ".dylib")
-                os.contains("Linux") -> listOf("linux/libnativedatachannels.so" to ".so")
+                os.contains("Linux") && !isAndroid() -> listOf("linux/libnativedatachannels.so" to ".so")
                 os.contains("Windows") -> listOf(
                     "windows/libcrypto-3-x64.dll" to ".dll",
                     "windows/libssl-3-x64.dll" to ".dll",

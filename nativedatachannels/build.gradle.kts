@@ -1,9 +1,11 @@
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidLibrary)
     id("module.publication")
+    `maven-publish`
 }
 
 tasks.withType<Jar> {
@@ -129,6 +131,34 @@ android {
         cmake {
             path = file("src/commonJvm/cpp/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+}
+
+val ext: MutableMap<String, Any> = mutableMapOf()
+fun getExtraString(name: String) = ext[name]?.toString()
+
+val secretPropsFile: File = project.rootProject.file("local.properties")
+if (secretPropsFile.exists()) {
+    secretPropsFile.reader().use {
+        Properties().apply {
+            load(it)
+        }
+    }.onEach { (name, value) ->
+        ext[name.toString()] = value
+    }
+} else {
+    ext["gpr.user"] = System.getenv("GPR_USER")
+    ext["gpr.key"] = System.getenv("GPR_KEY")
+}
+
+publishing {
+    repositories.maven {
+        name = "Repsy"
+        url = uri("https://repo.repsy.io/mvn/frontendlabs/nativedatachannels")
+        credentials {
+            username = getExtraString("gpr.user")
+            password = getExtraString("gpr.key")
         }
     }
 }

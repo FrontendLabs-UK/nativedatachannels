@@ -31,21 +31,31 @@ object Rtc {
         runBlocking {
             val os = System.getProperty("os.name")
 
-            val libName = when (os) {
-                "Mac OS X" -> "libnativedatachannels.dylib" to ".dylib"
-                "Linux" -> "libnativedatachannels.so" to ".so"
-                "Windows" -> "nativedatachannels.dll" to ".dll"
-                else -> "" to ""
+            val libNames = when {
+                os.contains("Mac OS X") -> listOf("macos/libnativedatachannels.dylib" to ".dylib")
+                os.contains("Linux") -> listOf("linux/libnativedatachannels.so" to ".so")
+                os.contains("Windows") -> listOf(
+                    "windows/libcrypto-3-x64.dll" to ".dll",
+                    "windows/libssl-3-x64.dll" to ".dll",
+                    "windows/juice.dll" to ".dll",
+                    "windows/datachannel.dll" to ".dll",
+                    "windows/libnativedatachannels.dll" to ".dll",
+                )
+                else -> emptyList()
             }
 
-            if (libName.first.isNotEmpty()) {
-                val resource = loadResource(libName.first)
-                val path = kotlin.io.path.createTempFile("libnativedatachannels", libName.second)
-                path.toFile().deleteOnExit()
+            libNames.forEach { libName ->
+                if (libName.first.isNotEmpty()) {
+                    val resource = loadResource(libName.first)
+                    val path = kotlin.io.path.createTempFile("tmp", libName.second)
+                    path.toFile().deleteOnExit()
 
-                path.outputStream().use { it.write(resource) }
-                System.load(path.absolutePathString())
-            } else {
+                    path.outputStream().use { it.write(resource) }
+                    System.load(path.absolutePathString())
+                }
+            }
+
+            if (libNames.isEmpty()) {
                 System.loadLibrary("nativedatachannels")
             }
         }

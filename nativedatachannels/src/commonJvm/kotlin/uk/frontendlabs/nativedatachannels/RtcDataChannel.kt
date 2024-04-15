@@ -1,158 +1,7 @@
 package uk.frontendlabs.nativedatachannels
 
-internal class Reliability {
-    internal var handle: Long
-
-    constructor() {
-        nativeCreate().also { handle = it }
-        if (handle == -1L) {
-            throw RuntimeException("Failed to create native Reliability")
-        }
-    }
-
-    internal constructor(handle: Long) {
-        this.handle = handle
-    }
-
-    var unordered: Boolean
-        set(value) = unordered(handle, value)
-        get() = getUnordered(handle)
-
-    var unreliable: Boolean
-        set(value) = unreliable(handle, value)
-        get() = getUnreliable(handle)
-
-    var maxPacketLifeTime: Int
-        set(value) = maxPacketLifeTime(handle, value)
-        get() = getMaxPacketLifeTime(handle)
-
-    var maxRetransmits: Int
-        set(value) = maxRetransmits(handle, value)
-        get() = getMaxRetransmits(handle)
-
-    private external fun nativeCreate(): Long
-    private external fun nativeDelete(handle: Long)
-
-    private external fun unordered(handle: Long, value: Boolean)
-    private external fun getUnordered(handle: Long): Boolean
-
-    private external fun unreliable(handle: Long, value: Boolean)
-    private external fun getUnreliable(handle: Long): Boolean
-
-    private external fun maxPacketLifeTime(handle: Long, value: Int)
-    private external fun getMaxPacketLifeTime(handle: Long): Int
-
-    private external fun maxRetransmits(handle: Long, value: Int)
-    private external fun getMaxRetransmits(handle: Long): Int
-
-    fun free() {
-        nativeDelete(handle)
-    }
-}
-
-data class RtcReliability(
-    val unordered: Boolean,
-    val unreliable: Boolean,
-    val maxPacketLifeTime: Int,
-    val maxRetransmits: Int
-) {
-    internal constructor(native: Reliability): this(
-        native.unordered, native.unreliable, native.maxPacketLifeTime, native.maxRetransmits
-    )
-
-    internal fun toNative(): Reliability {
-        return Reliability().apply {
-            unordered = unordered
-            unreliable = unreliable
-            maxPacketLifeTime = maxPacketLifeTime
-            maxRetransmits = maxRetransmits
-        }
-    }
-}
-
-data class RtcDataChannelInit(
-    var reliability: RtcReliability,
-    var protocol: String,
-    var negotiated: Boolean,
-    var manualStream: Boolean,
-    var stream: Short
-) {
-    internal constructor(native: DataChannelInit): this(
-        native.reliability, native.protocol, native.negotiated, native.manualStream, native.stream
-    )
-
-    internal fun toNative(): DataChannelInit {
-        return DataChannelInit().apply {
-            reliability = reliability
-            protocol = protocol
-            negotiated = negotiated
-            manualStream = manualStream
-            stream = stream
-        }
-    }
-}
-
-internal class DataChannelInit {
-    internal val handle: Long
-
-    init {
-        nativeCreate().also { handle = it }
-        if (handle == -1L) {
-            throw RuntimeException("Failed to create native DataChannelInit")
-        }
-    }
-
-    var reliability: RtcReliability
-        set(value) {
-            val tmp = value.toNative()
-            setReliability(handle, tmp.handle)
-            tmp.free()
-        }
-        get() {
-            val tmp = Reliability(getReliability(handle))
-            val reliability = RtcReliability(tmp)
-            tmp.free()
-            return reliability
-        }
-
-    var protocol: String
-        set(value) = setProtocol(handle, value)
-        get() = getProtocol(handle)
-
-    var negotiated: Boolean
-        set(value) = setNegotiated(handle, value)
-        get() = getNegotiated(handle)
-
-    var manualStream: Boolean
-        set(value) = setManualStream(handle, value)
-        get() = getManualStream(handle)
-
-    var stream: Short
-        set(value) = setStream(handle, value)
-        get() = getStream(handle)
-
-    fun free() {
-        nativeDelete(handle)
-    }
-
-    private external fun nativeCreate(): Long
-    private external fun nativeDelete(handle: Long)
-
-    private external fun setReliability(handle: Long, reliabilityHandle: Long)
-    private external fun getReliability(handle: Long): Long
-
-    private external fun setProtocol(handle: Long, value: String)
-    private external fun getProtocol(handle: Long): String
-
-    private external fun setNegotiated(handle: Long, value: Boolean)
-    private external fun getNegotiated(handle: Long): Boolean
-
-    private external fun setManualStream(handle: Long, value: Boolean)
-    private external fun getManualStream(handle: Long): Boolean
-
-    private external fun setStream(handle: Long, value: Short)
-    private external fun getStream(handle: Long): Short
-}
+import com.sun.jna.Pointer
+import kotlin.math.absoluteValue
 
 interface DataHandler {
     fun onOpen(client: RtcCommonClient) {}
@@ -167,17 +16,53 @@ class RtcDataChannel(
     private val handler: DataHandler,
     private val handle: Int
 ): RtcCommon, RtcCommonClient {
-    init {
-        setOpenCallback(handle) { handler.onOpen(this) }
-        setClosedCallback(handle) { handler.onClosed(this) }
-        setErrorCallback(handle) { handler.onError(this, it) }
-        setMessageCallback(handle) { handler.onMessage(this, it) }
-        setBufferedAmountLowCallback(handle) { handler.onBufferedAmountLow(this) }
-        setAvailableCallback(handle) { handler.onAvailable(this) }
+    private val openCallback = object: LibDatachannels.rtcOpenCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onOpen(this@RtcDataChannel)
+        }
     }
 
-    override fun sendMessage(message: ByteArray): Result<Unit> {
-        val result = sendMessage(handle, message)
+    private val closedCallback = object: LibDatachannels.rtcClosedCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onClosed(this@RtcDataChannel)
+        }
+    }
+
+    private val errorCallback = object: LibDatachannels.rtcErrorCallbackFunc {
+        override fun invoke(id: Int, error: String, pointer: Pointer?) {
+            handler.onError(this@RtcDataChannel, error)
+        }
+    }
+
+    private val messageCallback = object: LibDatachannels.rtcMessageCallbackFunc {
+        override fun invoke(id: Int, message: Pointer, size: Int, pointer: Pointer?) {
+            handler.onMessage(this@RtcDataChannel, message.getByteArray(0, size.absoluteValue))
+        }
+    }
+
+    private val bufferedAmountLowCallback = object: LibDatachannels.rtcBufferedAmountLowCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onBufferedAmountLow(this@RtcDataChannel)
+        }
+    }
+
+    private val availableCallback = object: LibDatachannels.rtcAvailableCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onAvailable(this@RtcDataChannel)
+        }
+    }
+
+    init {
+        setOpenCallback(handle, openCallback)
+        setClosedCallback(handle, closedCallback)
+        setErrorCallback(handle, errorCallback)
+        setMessageCallback(handle, messageCallback)
+        setBufferedAmountLowCallback(handle, bufferedAmountLowCallback)
+        setAvailableCallback(handle, availableCallback)
+    }
+
+    override fun sendMessage(message: Pointer, size: Int): Result<Unit> {
+        val result = sendMessage(handle, message, size)
         return resultFromCode(result)
     }
 
@@ -210,26 +95,37 @@ class RtcDataChannel(
     }
 
     val stream: Int
-        get() = getStream(handle)
+        get() = native.rtcGetDataChannelStream(handle)
 
     val label: String?
-        get() = getLabel(handle)
+        get() {
+            val labelBytes = ByteArray(256)
+            val result = native.rtcGetDataChannelLabel(handle, labelBytes, labelBytes.size)
+            if (result < 0) {
+                return null
+            }
+
+            return String(labelBytes, 0, result)
+        }
 
     val protocol: String?
-        get() = getProtocol(handle)
-
-    val reliability: RtcReliability
         get() {
-            val native = Reliability(getReliability(handle))
-            val reliability = RtcReliability(native)
-            native.free()
+            val protocolBytes = ByteArray(256)
+            val result = native.rtcGetDataChannelProtocol(handle, protocolBytes, protocolBytes.size)
+            if (result < 0) {
+                return null
+            }
+
+            return String(protocolBytes, 0, result)
+        }
+
+    val reliability: LibDatachannels.rtcReliability
+        get() {
+            val reliability = LibDatachannels.rtcReliability()
+            native.rtcGetDataChannelReliability(handle, reliability)
             return reliability
         }
 
-    private external fun getStream(handle: Int): Int
-    private external fun getLabel(handle: Int): String?
-    private external fun getProtocol(handle: Int): String?
-    private external fun getReliability(handle: Int): Long
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false

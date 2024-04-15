@@ -1,5 +1,6 @@
 package uk.frontendlabs.nativedatachannels.peer
 
+import com.sun.jna.Memory
 import uk.frontendlabs.nativedatachannels.DataHandler
 import uk.frontendlabs.nativedatachannels.PeerConnectionHandler
 import uk.frontendlabs.nativedatachannels.RtcCommonClient
@@ -98,7 +99,10 @@ class Peer: DataHandler, PeerConnectionHandler {
 
     private fun createGroup() {
         val message = CreateGroup
-        webSocket.sendMessage(CreateGroup.toJson().toByteArray())
+        val messageBytes = message.toJson().toByteArray()
+        val ptr = Memory(messageBytes.size.toLong())
+        ptr.write(0, messageBytes, 0, messageBytes.size)
+        webSocket.sendMessage(ptr, messageBytes.size)
     }
 
     private fun joinGroup() {
@@ -137,7 +141,9 @@ class Peer: DataHandler, PeerConnectionHandler {
         }
     }
 
-    override fun onError(client: RtcCommonClient, error: String) {}
+    override fun onError(client: RtcCommonClient, error: String) {
+        println("XXX: [Peer] WebSocket Error: $error")
+    }
 
     override fun onLocalDescription(pc: RtcPeerConnection, sdp: String, type: String) {
         peerHandler.onLocalDescription(pc, sdp, type)
@@ -173,18 +179,31 @@ class Peer: DataHandler, PeerConnectionHandler {
     }
 
     override fun onGatheringStateChange(pc: RtcPeerConnection, gatheringState: RtcGatheringState) {
-        if (gatheringState != RtcGatheringState.COMPLETE) return
-        if (role == PeerRole.JOINER && state.value == PeerState.OfferPending) {
-            peerConnection.localDescription?.let {
-                val message = JoinGroup(group!!, it, "offer")
-                webSocket.sendMessage(message.toJson().toByteArray())
-                state.value = PeerState.WaitingForAnswer
-            }
-        } else if (role == PeerRole.CREATOR && state.value == PeerState.AnswerPending) {
-            peerConnection.localDescription?.let {
-                val message = AnswerGroup(phrase.value, it, "answer")
-                webSocket.sendMessage(message.toJson().toByteArray())
-                state.value = PeerState.AnswerSent
+        if (gatheringState == RtcGatheringState.COMPLETE) {
+            println("XXX: [Peer] Gathering complete")
+            println("XXX: [Peer] state: ${state.value}")
+            if (role == PeerRole.JOINER && state.value == PeerState.OfferPending) {
+                println("XXX: Will try 2 send local desc")
+                peerConnection.localDescription?.let {
+                    println("XXX: [Peer] Sending a local description")
+                    val message = JoinGroup(group!!, it, "offer")
+                    val messageBytes = message.toJson().toByteArray()
+                    val ptr = Memory(messageBytes.size.toLong())
+                    ptr.write(0, messageBytes, 0, messageBytes.size)
+                    webSocket.sendMessage(ptr, messageBytes.size)
+                    ptr.close()
+                    state.value = PeerState.WaitingForAnswer
+                }
+            } else if (role == PeerRole.CREATOR && state.value == PeerState.AnswerPending) {
+                peerConnection.localDescription?.let {
+                    val message = AnswerGroup(phrase.value, it, "answer")
+                    val messageBytes = message.toJson().toByteArray()
+                    val ptr = Memory(messageBytes.size.toLong())
+                    ptr.write(0, messageBytes, 0, messageBytes.size)
+                    webSocket.sendMessage(ptr, messageBytes.size)
+                    ptr.close()
+                    state.value = PeerState.AnswerSent
+                }
             }
         }
         peerHandler.onGatheringStateChange(pc, gatheringState)

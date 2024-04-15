@@ -1,5 +1,7 @@
 package uk.frontendlabs.nativedatachannels
 
+import com.sun.jna.Pointer
+
 enum class RtcPeerConnectionState(val value: Int) {
     NEW(0),
     CONNECTING(1),
@@ -25,38 +27,54 @@ interface PeerConnectionHandler {
     fun dataChannelHandler(): DataHandler
 }
 
+private const val fiveMegabytes = 1024 * 1024 * 5
+
 class RtcPeerConnection(
     config: RtcConfiguration,
     private val handler: PeerConnectionHandler
 ) {
+    private val native = LibDatachannels.INSTANCE
+
     private val handle: Int
 
-    private fun localDescriptionCallback(sdp: String, type: String) {
-        handler.onLocalDescription(this, sdp, type)
+    private val localDescriptionCallback = object: LibDatachannels.rtcDescriptionCallbackFunc {
+        override fun invoke(pc: Int, sdp: String, type: String, pointer: Pointer?) {
+            handler.onLocalDescription(this@RtcPeerConnection, sdp, type)
+        }
     }
 
-    private fun localCandidateCallback(candidate: String, mid: String) {
-        handler.onLocalCandidate(this, candidate, mid)
+    private val localCandidateCallback = object: LibDatachannels.rtcCandidateCallbackFunc {
+        override fun invoke(pc: Int, cand: String, mid: String, pointer: Pointer?) {
+            handler.onLocalCandidate(this@RtcPeerConnection, cand, mid)
+        }
     }
 
-    private fun stateChangeCallback(state: Int) {
-        handler.onStateChange(this, RtcPeerConnectionState.entries.firstOrNull { it.value == state } ?: RtcPeerConnectionState.NEW)
+    private val stateChangeCallback = object: LibDatachannels.rtcStateChangeCallbackFunc {
+        override fun invoke(pc: Int, rtcState: Int, pointer: Pointer?) {
+            handler.onStateChange(this@RtcPeerConnection, RtcPeerConnectionState.entries.firstOrNull { it.value == rtcState } ?: RtcPeerConnectionState.NEW)
+        }
     }
 
-    private fun gatheringStateChangeCallback(gatheringState: Int) {
-        handler.onGatheringStateChange(this, RtcGatheringState.entries.firstOrNull { it.value == gatheringState } ?: RtcGatheringState.NEW)
+    private val gatheringStateChangeCallback = object: LibDatachannels.rtcGatheringStateCallbackFunc {
+        override fun invoke(pc: Int, state: Int, pointer: Pointer?) {
+            handler.onGatheringStateChange(this@RtcPeerConnection, RtcGatheringState.entries.firstOrNull { it.value == state } ?: RtcGatheringState.NEW)
+        }
     }
 
-    private fun dataChannelCallback(dataChannelHandle: Int) {
-        handler.onDataChannel(this, RtcDataChannel(handler.dataChannelHandler(), dataChannelHandle))
+    private val dataChannelCallback = object: LibDatachannels.rtcDataChannelCallbackFunc {
+        override fun invoke(pc: Int, dataChannel: Int, pointer: Pointer?) {
+            handler.onDataChannel(this@RtcPeerConnection, RtcDataChannel(handler.dataChannelHandler(), dataChannel))
+        }
     }
 
-    private fun trackCallback(trackHandle: Int) {
-        handler.onTrack(this, RtcTrack(trackHandle, handler.dataChannelHandler()))
+    private val trackCallback = object: LibDatachannels.rtcTrackCallbackFunc {
+        override fun invoke(pc: Int, track: Int, pointer: Pointer?) {
+            handler.onTrack(this@RtcPeerConnection, RtcTrack(track, handler.dataChannelHandler()))
+        }
     }
 
     init {
-        handle = nativeCreate(config.nativeHandle)
+        handle = native.rtcCreatePeerConnection(config)
         if (handle == -1) {
             throw RuntimeException("Failed to create native RtcPeerConnection")
         }
@@ -65,110 +83,139 @@ class RtcPeerConnection(
     }
 
     private fun initializeCallbacks() {
-        nativeSetLocalDescriptionCallback(handle, ::localDescriptionCallback)
-        nativeSetLocalCandidateCallback(handle, ::localCandidateCallback)
-        nativeSetStateChangeCallback(handle, ::stateChangeCallback)
-        nativeSetGatheringStateChangeCallback(handle, ::gatheringStateChangeCallback)
-        nativeSetDataChannelCallback(handle, ::dataChannelCallback)
-        nativeSetTrackCallback(handle, ::trackCallback)
+        native.rtcSetLocalDescriptionCallback(handle, localDescriptionCallback)
+        native.rtcSetLocalCandidateCallback(handle, localCandidateCallback)
+        native.rtcSetStateChangeCallback(handle, stateChangeCallback)
+        native.rtcSetGatheringStateChangeCallback(handle, gatheringStateChangeCallback)
+        native.rtcSetDataChannelCallback(handle, dataChannelCallback)
+        native.rtcSetTrackCallback(handle, trackCallback)
     }
 
     fun close() {
-        nativeClose(handle)
+        native.rtcClose(handle)
     }
 
     fun free() {
-        nativeDelete(handle)
+        native.rtcDelete(handle)
     }
 
     fun setLocalDescription(type: String?): Int {
-        return nativeSetLocalDescription(handle, type)
+        return native.rtcSetLocalDescription(handle, type)
     }
 
     fun setRemoteDescription(sdp: String, type: String): Int {
-        return nativeSetRemoteDescription(handle, sdp, type)
+        return native.rtcSetRemoteDescription(handle, sdp, type)
     }
 
     fun addRemoteCandidate(candidate: String, mid: String): Int {
-        return addRemoteCandidate(handle, candidate, mid)
+        return native.rtcAddRemoteCandidate(handle, candidate, mid)
     }
 
     val localDescription: String?
-        get() = nativeGetLocalDescription(handle)
+        get() {
+            val buffer = ByteArray(fiveMegabytes)
+            val count = native.rtcGetLocalDescription(handle, buffer, buffer.size)
+            return if (count > 0) {
+                String(buffer, 0, count - 1)
+            } else {
+                null
+            }
+        }
 
     val remoteDescription: String?
-        get() = nativeGetRemoteDescription(handle)
+        get() {
+            val buffer = ByteArray(fiveMegabytes)
+            val count = native.rtcGetRemoteDescription(handle, buffer, buffer.size)
+            return if (count > 0) {
+                String(buffer, 0, count)
+            } else {
+                null
+            }
+        }
 
     val localDescriptionType: String?
-        get() = nativeGetLocalDescriptionType(handle)
+        get() {
+            val buffer = ByteArray(fiveMegabytes)
+            val count = native.rtcGetLocalDescriptionType(handle, buffer, buffer.size)
+            return if (count > 0) {
+                String(buffer, 0, count)
+            } else {
+                null
+            }
+        }
 
     val remoteDescriptionType: String?
-        get() = nativeGetRemoteDescriptionType(handle)
+        get() {
+            val buffer = ByteArray(fiveMegabytes)
+            val count = native.rtcGetRemoteDescriptionType(handle, buffer, buffer.size)
+            return if (count > 0) {
+                String(buffer, 0, count)
+            } else {
+                null
+            }
+        }
 
     val localAddress: String?
-        get() = nativeGetLocalAddress(handle)
+        get() {
+            val buffer = ByteArray(fiveMegabytes)
+            val count = native.rtcGetLocalAddress(handle, buffer, buffer.size)
+            return if (count > 0) {
+                String(buffer, 0, count)
+            } else {
+                null
+            }
+        }
 
     val remoteAddress: String?
-        get() = nativeGetRemoteAddress(handle)
+        get() {
+            val buffer = ByteArray(fiveMegabytes)
+            val count = native.rtcGetRemoteAddress(handle, buffer, buffer.size)
+            return if (count > 0) {
+                String(buffer, 0, count)
+            } else {
+                null
+            }
+        }
 
+    // TODO: A potential bug here!!!
     val selectedCandidatePair: Pair<String?, String?>?
-        get() = nativeGetSelectedCandidatePair(handle)
+        get() {
+            val localBuffer = ByteArray(fiveMegabytes)
+            val remoteBuffer = ByteArray(fiveMegabytes)
+            val count = native.rtcGetSelectedCandidatePair(handle, localBuffer, localBuffer.size, remoteBuffer, remoteBuffer.size)
+            return if (count > 0) {
+                Pair(String(localBuffer, 0, count), String(remoteBuffer, 0, count))
+            } else {
+                null
+            }
+        }
 
-    val maximumDataChannelStream: Long
-        get() = nativeGetMaximumDataChannelStream(handle)
+    val maximumDataChannelStream: Int
+        get() = native.rtcGetMaxDataChannelStream(handle)
 
     val remoteMaxMessageSize: Int
-        get() = nativeGetRemoteMaxMessageSize(handle)
+        get() = native.rtcGetRemoteMaxMessageSize(handle)
 
     fun createDataChannel(label: String): Result<RtcDataChannel> {
-        val dataChannelHandle = nativeCreateDataChannel(handle, label)
+        val dataChannelHandle = native.rtcCreateDataChannel(handle, label)
         if (dataChannelHandle < 0) {
             return Result.failure(RuntimeException("Failed to create data channel"))
         }
         return Result.success(RtcDataChannel(handler.dataChannelHandler(), dataChannelHandle))
     }
 
-    fun createDataChannel(label: String, init: RtcDataChannelInit): Result<RtcDataChannel> {
-        val native = init.toNative()
-        val dataChannelHandle = nativeCreateDataChannelEx(handle, label, native.handle)
+    fun createDataChannel(label: String, init: LibDatachannels.rtcDataChannelInit): Result<RtcDataChannel> {
+        val dataChannelHandle = native.rtcCreateDataChannelEx(handle, label, init)
         if (dataChannelHandle < 0) {
             return Result.failure(RuntimeException("Failed to create data channel"))
         }
-        native.free()
         return Result.success(RtcDataChannel(handler.dataChannelHandler(), dataChannelHandle))
     }
 
     fun addTrack(mediaDescriptionSdp: String): Int {
-        return nativeAddTrack(handle, mediaDescriptionSdp)
+        return native.rtcAddTrack(handle, mediaDescriptionSdp)
     }
 
-    private external fun nativeCreate(configHandle: Long): Int
-    private external fun nativeDelete(handle: Int)
-    private external fun nativeClose(handle: Int): Int
-    private external fun nativeSetLocalDescriptionCallback(handle: Int, callback: (sdp: String, type: String) -> Unit): Int
-    private external fun nativeSetLocalCandidateCallback(handle: Int, callback: (candidate: String, mid: String) -> Unit): Int
-    private external fun nativeSetStateChangeCallback(handle: Int, callback: (state: Int) -> Unit): Int
-    private external fun nativeSetGatheringStateChangeCallback(handle: Int, callback: (gatheringState: Int) -> Unit): Int
-    private external fun nativeSetDataChannelCallback(handle: Int, callback: (dataChannel: Int) -> Unit): Int
-    private external fun nativeSetTrackCallback(handle: Int, callback: (track: Int) -> Unit): Int
-
-    private external fun nativeSetLocalDescription(handle: Int, type: String?): Int
-    private external fun nativeSetRemoteDescription(handle: Int, sdp: String, type: String): Int
-    private external fun addRemoteCandidate(handle: Int, candidate: String, mid: String): Int
-    private external fun nativeGetLocalDescription(handle: Int): String?
-    private external fun nativeGetRemoteDescription(handle: Int): String?
-    private external fun nativeGetLocalDescriptionType(handle: Int): String?
-    private external fun nativeGetRemoteDescriptionType(handle: Int): String?
-    private external fun nativeGetLocalAddress(handle: Int): String?
-    private external fun nativeGetRemoteAddress(handle: Int): String?
-    private external fun nativeGetSelectedCandidatePair(handle: Int): Pair<String?, String?>?
-    private external fun nativeGetMaximumDataChannelStream(handle: Int): Long
-    private external fun nativeGetRemoteMaxMessageSize(handle: Int): Int
-
-    private external fun nativeCreateDataChannel(handle: Int, label: String): Int
-    private external fun nativeCreateDataChannelEx(handle: Int, label: String, initHandle: Long): Int
-
-    private external fun nativeAddTrack(handle: Int, mediaDescriptionSdp: String): Int
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
@@ -181,6 +228,4 @@ class RtcPeerConnection(
     override fun hashCode(): Int {
         return handle
     }
-
-
 }

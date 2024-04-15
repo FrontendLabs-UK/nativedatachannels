@@ -1,5 +1,7 @@
 package uk.frontendlabs.nativedatachannels
 
+import com.sun.jna.Pointer
+
 class RtcWebSocketServer(
     private val clientHandler: DataHandler,
     port: Short = 0,
@@ -12,33 +14,32 @@ class RtcWebSocketServer(
 ) : RtcCommon, RtcCommonClient {
     private var handle: Int
 
-    private fun webSocketCallback(socketHandle: Int) {
-        onWebSocketConnection(RtcWebSocket(socketHandle, clientHandler))
+    private val webSocketCallback = object: LibDatachannels.rtcWebSocketClientCallbackFunc {
+        override fun invoke(wsserver: Int, ws: Int, pointer: Pointer?) {
+            onWebSocketConnection(RtcWebSocket(ws, clientHandler))
+        }
     }
 
     init {
-        nativeCreate(port, enableTls, certificatePemFile, keyPemFile, keyPemPass, connectionTimeoutMs, ::webSocketCallback).also { handle = it }
+        val config = LibDatachannels.rtcWsServer()
+        config.port = port
+        config.enableTls = enableTls
+        config.certificatePemFile = certificatePemFile
+        config.keyPemFile = keyPemFile
+        config.keyPemPass = keyPemPass
+        config.connectionTimeoutMs = connectionTimeoutMs
+
+        native.rtcCreateWebSocketServer(config, webSocketCallback).also { handle = it }
         if (handle == -1) {
             throw RuntimeException("Failed to create native RtcWebSocket")
         }
         println("WSServer Handle is: $handle")
     }
 
-    private external fun nativeCreate(
-        port: Short, enableTls: Boolean,
-        certificatePemFile: String?, keyPemFile: String?,
-        keyPemPass: String?, connectionTimeoutMs: Int,
-        cb: (Int) -> Unit
-    ): Int
+    fun getPort() = native.rtcGetWebSocketServerPort(handle)
 
-    private external fun nativeDelete(handle: Int)
-
-    private external fun nativeGetPort(handle: Int): Int
-
-    fun getPort() = nativeGetPort(handle)
-
-    override fun sendMessage(message: ByteArray): Result<Unit> {
-        val result = sendMessage(handle, message)
+    override fun sendMessage(message: Pointer, size: Int): Result<Unit> {
+        val result = sendMessage(handle, message, size)
         return resultFromCode(result)
     }
 
@@ -67,7 +68,7 @@ class RtcWebSocketServer(
     }
 
     override fun free() {
-        nativeDelete(handle)
+        native.rtcDelete(handle)
     }
 
     override fun equals(other: Any?): Boolean {

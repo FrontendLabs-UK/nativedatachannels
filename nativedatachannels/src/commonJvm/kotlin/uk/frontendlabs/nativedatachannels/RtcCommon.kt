@@ -1,52 +1,57 @@
 package uk.frontendlabs.nativedatachannels
 
+import com.sun.jna.Pointer
+import java.awt.Point
+
 internal interface RtcCommon {
-    fun setOpenCallback(handle: Int, callback: () -> Unit) {
-        Rtc.setOpenCallback(handle, callback)
+    val native: LibDatachannels get() = LibDatachannels.INSTANCE
+
+    fun setOpenCallback(handle: Int, callback: LibDatachannels.rtcOpenCallbackFunc) {
+        native.rtcSetOpenCallback(handle, callback)
     }
-    fun setClosedCallback(handle: Int, callback: () -> Unit) {
-        Rtc.setClosedCallback(handle, callback)
+    fun setClosedCallback(handle: Int, callback: LibDatachannels.rtcClosedCallbackFunc) {
+        native.rtcSetClosedCallback(handle, callback)
     }
-    fun setErrorCallback(handle: Int, callback: (String) -> Unit) {
-        Rtc.setErrorCallback(handle, callback)
+    fun setErrorCallback(handle: Int, callback: LibDatachannels.rtcErrorCallbackFunc) {
+        native.rtcSetErrorCallback(handle, callback)
     }
-    fun setMessageCallback(handle: Int, callback: (ByteArray) -> Unit) {
-        Rtc.setMessageCallback(handle, callback)
+    fun setMessageCallback(handle: Int, callback: LibDatachannels.rtcMessageCallbackFunc) {
+        native.rtcSetMessageCallback(handle, callback)
     }
-    fun setBufferedAmountLowCallback(handle: Int, callback: () -> Unit) {
-        Rtc.setBufferedAmountLowCallback(handle, callback)
+    fun setBufferedAmountLowCallback(handle: Int, callback: LibDatachannels.rtcBufferedAmountLowCallbackFunc) {
+        native.rtcSetBufferedAmountLowCallback(handle, callback)
     }
-    fun setAvailableCallback(handle: Int, callback: () -> Unit) {
-        Rtc.setAvailableCallback(handle, callback)
+    fun setAvailableCallback(handle: Int, callback: LibDatachannels.rtcAvailableCallbackFunc) {
+        native.rtcSetAvailableCallback(handle, callback)
     }
-    fun sendMessage(handle: Int, message: ByteArray): Int {
-        return Rtc.sendMessage(handle, message)
+    fun sendMessage(handle: Int, message: Pointer, size: Int): Int {
+        return native.rtcSendMessage(handle, message, size)
     }
     fun close(handle: Int): Int {
-        return Rtc.close(handle)
+        return native.rtcClose(handle)
     }
     fun delete(handle: Int) {
-        Rtc.free(handle)
+        native.rtcDelete(handle)
     }
     fun isOpen(handle: Int): Boolean {
-        return Rtc.isOpen(handle)
+        return native.rtcIsOpen(handle)
     }
     fun isClosed(handle: Int): Boolean {
-        return Rtc.isClosed(handle)
+        return native.rtcIsClosed(handle)
     }
     fun getMaxMessageSize(handle: Int): Int {
-        return Rtc.getMaxMessageSize(handle)
+        return native.rtcGetRemoteMaxMessageSize(handle)
     }
     fun getBufferedAmount(handle: Int): Int {
-        return Rtc.getBufferedAmount(handle)
+        return native.rtcGetBufferedAmount(handle)
     }
     fun setBufferedAmountLowThreshold(handle: Int, amount: Int): Int {
-        return Rtc.setBufferedAmountLowThreshold(handle, amount)
+        return native.rtcSetBufferedAmountLowThreshold(handle, amount)
     }
 }
 
 interface RtcCommonClient {
-    fun sendMessage(message: ByteArray): Result<Unit>
+    fun sendMessage(message: Pointer, size: Int): Result<Unit>
     fun close(): Result<Unit>
     fun isOpen(): Result<Boolean>
     fun isClosed(): Result<Boolean>

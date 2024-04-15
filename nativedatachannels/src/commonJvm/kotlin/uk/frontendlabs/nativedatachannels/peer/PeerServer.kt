@@ -1,5 +1,6 @@
 package uk.frontendlabs.nativedatachannels.peer
 
+import com.sun.jna.Memory
 import uk.frontendlabs.nativedatachannels.DataHandler
 import uk.frontendlabs.nativedatachannels.RtcCommonClient
 import uk.frontendlabs.nativedatachannels.RtcWebSocket
@@ -21,6 +22,9 @@ class PeerServer(port: Short): DataHandler {
         println("WebSocket connection established")
     }
 
+    val port: Int
+        get() = webSocketServer.getPort()
+
     override fun onMessage(client: RtcCommonClient, message: ByteArray) {
         println("[PeerServer] onMessage")
         val messageStr = String(message)
@@ -28,10 +32,14 @@ class PeerServer(port: Short): DataHandler {
             is CreateGroup -> {
                 val phrase = wordGenerator.newWord(6)
                 val groupInfo = GroupInfo(phrase)
-                client.sendMessage(groupInfo.toJson().toByteArray()).onSuccess {
+                val messageBytes = groupInfo.toJson().toByteArray()
+                val ptr = Memory(messageBytes.size.toLong())
+                ptr.write(0, messageBytes, 0, messageBytes.size)
+                client.sendMessage(ptr, messageBytes.size).onSuccess {
                     println("Sent group info to client")
                     waitingSockets[phrase] = PeerInfo(client as RtcWebSocket)
                 }
+                ptr.close()
             }
             is JoinGroup -> {
                 val group = message.group
@@ -46,7 +54,11 @@ class PeerServer(port: Short): DataHandler {
                     }
 
                     waitingSockets[group] = it.copy(second = client as RtcWebSocket)
-                    it.first.sendMessage(message.toJson().toByteArray())
+                    val messageBytes = message.toJson().toByteArray()
+                    val ptr = Memory(messageBytes.size.toLong())
+                    ptr.write(0, messageBytes, 0, messageBytes.size)
+                    it.first.sendMessage(ptr, messageBytes.size)
+                    ptr.close()
                 }
             }
             is AnswerGroup -> {
@@ -54,7 +66,11 @@ class PeerServer(port: Short): DataHandler {
                 val peer = waitingSockets[group]
                 peer?.let {
                     println("XXX: [PeerServer] AnswerGroup: Group found")
-                    it.second?.sendMessage(message.toJson().toByteArray())
+                    val messageBytes = message.toJson().toByteArray()
+                    val ptr = Memory(messageBytes.size.toLong())
+                    ptr.write(0, messageBytes, 0, messageBytes.size)
+                    it.second?.sendMessage(ptr, messageBytes.size)
+                    ptr.close()
                 } ?: run {
                     println("XXX: [PeerServer] AnswerGroup: Group not found")
                 }
@@ -63,11 +79,15 @@ class PeerServer(port: Short): DataHandler {
                 val group = message.group
                 val peer = waitingSockets[group]
                 peer?.let {
+                    val messageBytes = message.toJson().toByteArray()
+                    val ptr = Memory(messageBytes.size.toLong())
+                    ptr.write(0, messageBytes, 0, messageBytes.size)
                     if (message.isFor == PeerRole.CREATOR.name) {
-                        it.first.sendMessage(message.toJson().toByteArray())
+                        it.first.sendMessage(ptr, messageBytes.size)
                     } else {
-                        it.second?.sendMessage(message.toJson().toByteArray())
+                        it.second?.sendMessage(ptr, messageBytes.size)
                     }
+                    ptr.close()
                 }
             }
             else -> {}

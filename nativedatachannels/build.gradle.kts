@@ -99,6 +99,7 @@ kotlin {
             dependencies {
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.json)
+                api(libs.jna.platform)
             }
         }
         
@@ -125,13 +126,6 @@ android {
     
     sourceSets.all {
         jniLibs.srcDirs("artifacts/android-native")
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/commonJvm/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
     }
 }
 

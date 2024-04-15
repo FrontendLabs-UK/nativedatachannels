@@ -1,21 +1,60 @@
 package uk.frontendlabs.nativedatachannels
 
-class RtcWebSocket: RtcCommon, RtcCommonClient {
+import com.sun.jna.Pointer
+import kotlin.math.absoluteValue
+import kotlin.properties.Delegates
 
-    private var handle: Int
-    var handler: DataHandler
+class RtcWebSocket private constructor (
+    private val handler: DataHandler
+): RtcCommon, RtcCommonClient {
 
-    constructor(url: String, handler: DataHandler) {
-        this.handler = handler
-        nativeCreate(url).also { handle = it }
+    private var handle by Delegates.notNull<Int>()
+
+    private val openCallback = object: LibDatachannels.rtcOpenCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onOpen(this@RtcWebSocket)
+        }
+    }
+
+    private val closedCallback = object: LibDatachannels.rtcClosedCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onClosed(this@RtcWebSocket)
+        }
+    }
+
+    private val errorCallback = object: LibDatachannels.rtcErrorCallbackFunc {
+        override fun invoke(id: Int, error: String, pointer: Pointer?) {
+            handler.onError(this@RtcWebSocket, error)
+        }
+    }
+
+    private val messageCallback = object: LibDatachannels.rtcMessageCallbackFunc {
+        override fun invoke(id: Int, message: Pointer, size: Int, pointer: Pointer?) {
+            handler.onMessage(this@RtcWebSocket, message.getByteArray(0, size.absoluteValue))
+        }
+    }
+
+    private val bufferedAmountLowCallback = object: LibDatachannels.rtcBufferedAmountLowCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onBufferedAmountLow(this@RtcWebSocket)
+        }
+    }
+
+    private val availableCallback = object: LibDatachannels.rtcAvailableCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onAvailable(this@RtcWebSocket)
+        }
+    }
+
+    constructor(url: String, handler: DataHandler): this(handler) {
+        handle = native.rtcCreateWebSocket(url)
         if (handle == -1) {
             throw RuntimeException("Failed to create native RtcWebSocket")
         }
         init()
     }
 
-    constructor(handle: Int, handler: DataHandler) {
-        this.handler = handler
+    constructor(handle: Int, handler: DataHandler): this(handler) {
         this.handle = handle
         if (handle == -1) {
             throw RuntimeException("Failed to create native RtcWebSocket")
@@ -31,9 +70,14 @@ class RtcWebSocket: RtcCommon, RtcCommonClient {
         connectionTimeoutMs: Int,
         pingIntervalMs: Int,
         maxOutstandingPings: Int,
-    ) {
-        this.handler = handler
-        nativeCreateEx(url, disableTlsVerification, protocols, connectionTimeoutMs, pingIntervalMs, maxOutstandingPings).also { handle = it }
+    ): this(handler) {
+        val webSocketConfig = LibDatachannels.rtcWsConfiguration()
+        webSocketConfig.disableTlsVerification = disableTlsVerification
+        webSocketConfig.protocols = protocols
+        webSocketConfig.connectionTimeoutMs = connectionTimeoutMs
+        webSocketConfig.pingIntervalMs = pingIntervalMs
+        webSocketConfig.maxOutstandingPings = maxOutstandingPings
+        handle = native.rtcCreateWebSocketEx(url, webSocketConfig)
         if (handle == -1) {
             throw RuntimeException("Failed to create native RtcWebSocket")
         }
@@ -41,29 +85,16 @@ class RtcWebSocket: RtcCommon, RtcCommonClient {
     }
 
     private fun init() {
-        setOpenCallback(handle) { handler.onOpen(this) }
-        setClosedCallback(handle) { handler.onClosed(this) }
-        setErrorCallback(handle) { handler.onError(this, it) }
-        setMessageCallback(handle) { handler.onMessage(this, it) }
-        setBufferedAmountLowCallback(handle) { handler.onBufferedAmountLow(this) }
-        setAvailableCallback(handle) { handler.onAvailable(this) }
+        setOpenCallback(handle, openCallback)
+        setClosedCallback(handle, closedCallback)
+        setErrorCallback(handle, errorCallback)
+        setMessageCallback(handle, messageCallback)
+        setBufferedAmountLowCallback(handle, bufferedAmountLowCallback)
+        setAvailableCallback(handle, availableCallback)
     }
 
-    private external fun nativeCreate(url: String): Int
-    private external fun nativeCreateEx(
-        url: String,
-        disableTlsVerification: Boolean,
-        protocols: Array<String>,
-        connectionTimeoutMs: Int,
-        pingIntervalMs: Int,
-        maxOutstandingPings: Int,
-    ): Int
-    private external fun nativeDelete(handle: Int)
-    private external fun nativeGetRemoteAddress(handle: Int): String?
-    private external fun nativeGetPath(handle: Int): String?
-
-    override fun sendMessage(message: ByteArray): Result<Unit> {
-        val result = sendMessage(handle, message)
+    override fun sendMessage(message: Pointer, size: Int): Result<Unit> {
+        val result = sendMessage(handle, message, size)
         return resultFromCode(result)
     }
 
@@ -92,7 +123,7 @@ class RtcWebSocket: RtcCommon, RtcCommonClient {
     }
 
     override fun free() {
-        nativeDelete(handle)
+        native.rtcDelete(handle)
     }
 
     override fun equals(other: Any?): Boolean {

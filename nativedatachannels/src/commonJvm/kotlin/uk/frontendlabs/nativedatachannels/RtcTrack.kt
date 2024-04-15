@@ -1,5 +1,8 @@
 package uk.frontendlabs.nativedatachannels
 
+import com.sun.jna.Pointer
+import kotlin.math.absoluteValue
+
 enum class RtcTrackDirection(val value: Int) {
     UNKNOWN(0),
     SEND_ONLY(1),
@@ -19,26 +22,82 @@ class RtcTrack(
     private val handler: DataHandler
 ): RtcCommon, RtcCommonClient {
 
+    private val openCallback = object: LibDatachannels.rtcOpenCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onOpen(this@RtcTrack)
+        }
+    }
+
+    private val closedCallback = object: LibDatachannels.rtcClosedCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onClosed(this@RtcTrack)
+        }
+    }
+
+    private val errorCallback = object: LibDatachannels.rtcErrorCallbackFunc {
+        override fun invoke(id: Int, error: String, pointer: Pointer?) {
+            handler.onError(this@RtcTrack, error)
+        }
+    }
+
+    private val messageCallback = object: LibDatachannels.rtcMessageCallbackFunc {
+        override fun invoke(id: Int, message: Pointer, size: Int, pointer: Pointer?) {
+            handler.onMessage(this@RtcTrack, message.getByteArray(0, size.absoluteValue))
+        }
+    }
+
+    private val bufferedAmountLowCallback = object: LibDatachannels.rtcBufferedAmountLowCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onBufferedAmountLow(this@RtcTrack)
+        }
+    }
+
+    private val availableCallback = object: LibDatachannels.rtcAvailableCallbackFunc {
+        override fun invoke(id: Int, pointer: Pointer?) {
+            handler.onAvailable(this@RtcTrack)
+        }
+    }
+
     init {
-        setOpenCallback(handle) { handler.onOpen(this) }
-        setClosedCallback(handle) { handler.onClosed(this) }
-        setErrorCallback(handle) { handler.onError(this, it) }
-        setMessageCallback(handle) { handler.onMessage(this, it) }
-        setBufferedAmountLowCallback(handle) { handler.onBufferedAmountLow(this) }
-        setAvailableCallback(handle) { handler.onAvailable(this) }
+        setOpenCallback(handle, openCallback)
+        setClosedCallback(handle, closedCallback)
+        setErrorCallback(handle, errorCallback)
+        setMessageCallback(handle, messageCallback)
+        setBufferedAmountLowCallback(handle, bufferedAmountLowCallback)
+        setAvailableCallback(handle, availableCallback)
     }
 
     val description: String?
-        get() = getDescription(handle)
+        get() {
+            val buffer = ByteArray(256)
+            val result = native.rtcGetTrackDescription(handle, buffer, buffer.size)
+            return if (result > 0) {
+                String(buffer, 0, result)
+            } else {
+                null
+            }
+        }
 
     val mid: String?
-        get() = getMid(handle)
+        get() {
+            val buffer = ByteArray(256)
+            val result = native.rtcGetTrackMid(handle, buffer, buffer.size)
+            return if (result > 0) {
+                String(buffer, 0, result)
+            } else {
+                null
+            }
+        }
 
     val direction: RtcTrackDirection
-        get() = RtcTrackDirection.fromValue(getDirection(handle))
+        get() {
+            val directionArray = IntArray(1)
+            native.rtcGetTrackDirection(handle, directionArray)
+            return RtcTrackDirection.fromValue(directionArray[0])
+        }
 
-    override fun sendMessage(message: ByteArray): Result<Unit> {
-        val result = sendMessage(handle, message)
+    override fun sendMessage(message: Pointer, size: Int): Result<Unit> {
+        val result = sendMessage(handle, message, size)
         return resultFromCode(result)
     }
 
@@ -70,9 +129,6 @@ class RtcTrack(
         delete(handle)
     }
 
-    private external fun getDescription(handle: Int): String?
-    private external fun getMid(handle: Int): String?
-    private external fun getDirection(handle: Int): Int
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
@@ -85,6 +141,4 @@ class RtcTrack(
     override fun hashCode(): Int {
         return handle
     }
-
-
 }
